@@ -908,7 +908,7 @@ function handle_load_cap_via_cap(rd, cs, cap_val, vaddrBits) = {
       let c = mem_read_cap(addr, aq, rl, false);
       match c {
         MemValue(v) => {
-          let cr = if ptw_info == PTW_LOAD_CAP_ERR
+          let cr = if   ptw_info.ptw_lc_mod == PTW_LCM_CLR
                    then {v with tag = false} /* strip the tag */
                    else {v with tag = v.tag & cap_val.permit_load_cap};
           writeCapReg(rd, cr);
@@ -1006,7 +1006,7 @@ if not(cap_val.tag) then {
       let c = mem_read_cap(addr, aq, rl, false);
       match c {
         MemValue(v) => {
-          let cr = if   ptw_info == PTW_LOAD_CAP_ERR
+          let cr = if   ptw_info.ptw_lc_mod == PTW_LCM_CLR
                    then {v with tag = false} /* strip the tag */
                    else {
                      /* the Sail model currently reserves virtual addresses */
@@ -1169,16 +1169,24 @@ function handle_store_cap_via_cap(rs, cs, cap_val, vaddrBits) = {
     },
     TR_Failure(E_Extension(_), _) => { internal_error("unexpected cheri exception for cap store") },
     TR_Failure(e, _) => { handle_mem_exception(vaddrBits, e); RETIRE_FAIL },
-    TR_Address(addr, _) => {
-      let eares : MemoryOpResult(unit) = mem_write_ea_cap(addr, aq, rl, false);
-      match (eares) {
-        MemException(e) => { handle_mem_exception(addr, e); RETIRE_FAIL },
-        MemValue(_) => {
-          let res : MemoryOpResult(bool) = mem_write_cap(addr, rs_val, aq, rl, false);
-          match (res) {
-            MemValue(true)  => RETIRE_SUCCESS,
-            MemValue(false) => internal_error("store got false from mem_write_value"),
-            MemException(e) => { handle_mem_exception(addr, e); RETIRE_FAIL }
+    TR_Address(addr, caveats) => {
+      match (caveats.ptw_sc_mod, rs_val.tag) {
+        (PTW_SCM_TRAP, true) => {
+          handle_cheri_cap_exception(CapEx_TLBNoStoreCap, cs);
+          RETIRE_FAIL
+        },
+        _ => {
+          let eares : MemoryOpResult(unit) = mem_write_ea_cap(addr, aq, rl, false);
+          match (eares) {
+            MemException(e) => { handle_mem_exception(addr, e); RETIRE_FAIL },
+            MemValue(_) => {
+              let res : MemoryOpResult(bool) = mem_write_cap(addr, rs_val, aq, rl, false);
+              match (res) {
+                MemValue(true)  => RETIRE_SUCCESS,
+                MemValue(false) => internal_error("store got false from mem_write_value"),
+                MemException(e) => { handle_mem_exception(addr, e); RETIRE_FAIL }
+              }
+            }
           }
         }
       }
@@ -1317,26 +1325,34 @@ function handle_store_cond_cap_via_cap(cs2, cs, cap_val, vaddrBits) = {
       },
       TR_Failure(E_Extension(_), _) => { internal_error("unexpected cheri exception for cap store") },
       TR_Failure(e, _) => { handle_mem_exception(vaddrBits, e); RETIRE_FAIL },
-      TR_Address(addr, _) => {
-        let eares : MemoryOpResult(unit) = mem_write_ea_cap(addr, aq, rl, false);
-        match (eares) {
-          MemException(e) => { handle_mem_exception(addr, e); RETIRE_FAIL },
-          MemValue(_) => {
-            let res : MemoryOpResult(bool) = mem_write_cap(addr, cs2_val, aq, rl, false);
-            match (res) {
-              MemValue(true)  => {
-                 writeCapReg(cs2, int_to_cap(EXTZ(0b0)));
-                 cancel_reservation();
-                 RETIRE_SUCCESS
-              },
-              MemValue(false) => {
-                 writeCapReg(cs2, int_to_cap(EXTZ(0b1)));
-                 cancel_reservation();
-                 RETIRE_SUCCESS
-              },
-              MemException(e) => {
-                handle_mem_exception(addr, e);
-                RETIRE_FAIL
+      TR_Address(addr, caveats) => {
+        match (caveats.ptw_sc_mod, cs2_val.tag) {
+          (PTW_SCM_TRAP, true) => {
+            handle_cheri_cap_exception(CapEx_TLBNoStoreCap, cs);
+            RETIRE_FAIL
+          },
+          _ => {
+            let eares : MemoryOpResult(unit) = mem_write_ea_cap(addr, aq, rl, false);
+            match (eares) {
+              MemException(e) => { handle_mem_exception(addr, e); RETIRE_FAIL },
+              MemValue(_) => {
+                let res : MemoryOpResult(bool) = mem_write_cap(addr, cs2_val, aq, rl, false);
+                match (res) {
+                  MemValue(true)  => {
+                     writeCapReg(cs2, int_to_cap(EXTZ(0b0)));
+                     cancel_reservation();
+                     RETIRE_SUCCESS
+                  },
+                  MemValue(false) => {
+                     writeCapReg(cs2, int_to_cap(EXTZ(0b1)));
+                     cancel_reservation();
+                     RETIRE_SUCCESS
+                  },
+                  MemException(e) => {
+                    handle_mem_exception(addr, e);
+                    RETIRE_FAIL
+                  }
+                }
               }
             }
           }
