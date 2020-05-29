@@ -42,102 +42,69 @@ union PTE_Check = {
   PTE_Check_Failure : ext_ptw
 }
 
-function to_pte_check(b : bool) -> (bool, pte_check) =
-  (b, PTE_CAP_OK)
-
 function checkPTEPermission(ac : AccessType(ext_access_type), priv : Privilege, mxr : bool, do_sum : bool, p : PTE_Bits, ext : extPte, ext_ptw : ext_ptw) -> PTE_Check = {
-  let (succ, pte_chk) : (bool, pte_check) =
+  let    e = Mk_Ext_PTE_Bits(ext);
+  let lcav = if e.LoadCap()  == 0b1 then PTW_LCM_OK else PTW_LCM_CLR;
+  let scav = if e.StoreCap() == 0b1 then PTW_SCM_OK else PTW_SCM_TRAP;
+  let (succ, ext_ptw') : (bool, ext_ptw) =
   match (ac, priv) {
-    (Read(Data),      User)       => to_pte_check(p.U() == 0b1 & (p.R() == 0b1 | (p.X() == 0b1 & mxr))),
-    (Write(Data),     User)       => to_pte_check(p.U() == 0b1 & p.W() == 0b1),
-    (ReadWrite(Data), User)       => to_pte_check(p.U() == 0b1 & p.W() == 0b1 & (p.R() == 0b1 | (p.X() == 0b1 & mxr))),
-    (Execute(),       User)       => to_pte_check(p.U() == 0b1 & p.X() == 0b1),
+    (Read(Data),      User)       => (p.U() == 0b1 & (p.R() == 0b1 | (p.X() == 0b1 & mxr)), ext_ptw),
+    (Write(Data),     User)       => (p.U() == 0b1 & p.W() == 0b1, ext_ptw),
+    (ReadWrite(Data), User)       => (p.U() == 0b1 & p.W() == 0b1 & (p.R() == 0b1 | (p.X() == 0b1 & mxr)), ext_ptw),
+    (Execute(),       User)       => (p.U() == 0b1 & p.X() == 0b1, ext_ptw),
 
-    (Read(Data),      Supervisor) => to_pte_check((p.U() == 0b0 | do_sum) & (p.R() == 0b1 | (p.X() == 0b1 & mxr))),
-    (Write(Data),     Supervisor) => to_pte_check((p.U() == 0b0 | do_sum) & p.W() == 0b1),
-    (ReadWrite(Data), Supervisor) => to_pte_check((p.U() == 0b0 | do_sum) & p.W() == 0b1 & (p.R() == 0b1 | (p.X() == 0b1 & mxr))),
-    (Execute(),       Supervisor) => to_pte_check(p.U() == 0b0 & p.X() == 0b1),
+    (Read(Data),      Supervisor) => ((p.U() == 0b0 | do_sum) & (p.R() == 0b1 | (p.X() == 0b1 & mxr)), ext_ptw),
+    (Write(Data),     Supervisor) => ((p.U() == 0b0 | do_sum) & p.W() == 0b1, ext_ptw),
+    (ReadWrite(Data), Supervisor) => ((p.U() == 0b0 | do_sum) & p.W() == 0b1 & (p.R() == 0b1 | (p.X() == 0b1 & mxr)), ext_ptw),
+    (Execute(),       Supervisor) => (p.U() == 0b0 & p.X() == 0b1, ext_ptw),
 
     (Read(Cap),       User)       => { /* load-cap should probably not be affected by mxr. */
                                        if   p.U() == 0b1 & p.R() == 0b1
-                                       then {
-                                         let  e = Mk_Ext_PTE_Bits(ext);
-                                         if   e.LoadCap() == 0b1
-                                         then (true, PTE_CAP_OK)
-                                         else {
-                                           /* Allow the address translation to proceed, but mark for tag stripping */
-                                           (true, PTE_LOAD_CAP_ERR)
-                                         }
-                                       }
-                                       else (false, PTE_CAP_OK)
+                                       then
+                                         /*
+                                          * Allow the address translation to proceed,
+                                          * but mark for tag stripping
+                                          */
+                                         (true, ext_ptw_join_lcm(ext_ptw, lcav))
+                                       else (false, ext_ptw)
                                      },
 
     (Write(Cap),      User)       => { if   p.U() == 0b1 & p.W() == 0b1
-                                       then {
-                                         let  e = Mk_Ext_PTE_Bits(ext);
-                                         if   e.StoreCap() == 0b1
-                                         then (true, PTE_CAP_OK)
-                                         else {
-                                           /* Do not allow the address translation to proceed */
-                                           (false, PTE_STORE_CAP_ERR)
-                                         }
-                                       }
-                                       else (false, PTE_CAP_OK)
+                                       then
+                                         /*
+                                          * Allow the address translation to proceed,
+                                          * but mark for faulting on tag store
+                                          */
+                                         (true, ext_ptw_join_scm(ext_ptw, scav))
+                                       else (false, ext_ptw)
                                      },
 
     (ReadWrite(Cap),  User)       => { if   p.U() == 0b1 & p.R() == 0b1 & p.W() == 0b1
-                                       then {
-                                         let  e = Mk_Ext_PTE_Bits(ext);
-                                         if   e.StoreCap() == 0b1 & e.LoadCap() == 0b1
-                                         then (true, PTE_CAP_OK)
-                                         else if e.StoreCap() == 0b0
-                                         /* return a failure since we should cause an exception */
-                                         then (false, PTE_STORE_CAP_ERR)
-                                         /* return a success since the translation should proceed */
-                                         else (true, PTE_LOAD_CAP_ERR)
-                                       }
-                                       else (false, PTE_CAP_OK)
+                                       then
+                                         /* Both caveats apply */
+                                         (true, ext_ptw_join_scm(ext_ptw_join_lcm(ext_ptw, lcav), scav))
+                                       else (false, ext_ptw)
                                      },
 
     (Read(Cap),       Supervisor) => { if   (p.U() == 0b0 | do_sum) & p.R() == 0b1
-                                       then {
-                                         let  e = Mk_Ext_PTE_Bits(ext);
-                                         if   e.LoadCap() == 0b1
-                                         then (true, PTE_CAP_OK)
-                                         else (true, PTE_LOAD_CAP_ERR)
-                                       }
-                                       else (false, PTE_CAP_OK)
+                                       then (true, ext_ptw_join_lcm(ext_ptw, lcav))
+                                       else (false, ext_ptw)
                                      },
 
-    (Write(Cap),      Supervisor) => { let e = Mk_Ext_PTE_Bits(ext);
-                                       if   (p.U() == 0b0 | do_sum) & p.W() == 0b1
-                                       then {
-                                         if   e.StoreCap() == 0b1
-                                         then (true,  PTE_CAP_OK)
-                                         else (false, PTE_STORE_CAP_ERR)
-                                       }
-                                       else (false, PTE_CAP_OK)
+    (Write(Cap),      Supervisor) => { if   (p.U() == 0b0 | do_sum) & p.W() == 0b1
+                                       then (true, ext_ptw_join_scm(ext_ptw, scav))
+                                       else (false, ext_ptw)
                                      },
 
-    (ReadWrite(Cap),  Supervisor) => { let e = Mk_Ext_PTE_Bits(ext);
-                                       if   (p.U() == 0b0 | do_sum) & p.R() == 0b1 & p.W() == 0b1
-                                       then {
-                                         if   e.StoreCap() == 0b1 & e.LoadCap() == 0b1
-                                         then (true, PTE_CAP_OK)
-                                         else if e.StoreCap() == 0b0
-                                         /* return a failure since we should cause an exception */
-                                         then (false, PTE_STORE_CAP_ERR)
-                                         /* return a success since the translation should proceed */
-                                         else (true, PTE_LOAD_CAP_ERR)
-                                       }
-                                       else (false, PTE_CAP_OK)
+    (ReadWrite(Cap),  Supervisor) => { if   (p.U() == 0b0 | do_sum) & p.R() == 0b1 & p.W() == 0b1
+                                       then (true, ext_ptw_join_scm(ext_ptw_join_lcm(ext_ptw, lcav), scav))
+                                       else (false, ext_ptw)
                                      },
 
     (_,               Machine)    => internal_error("m-mode mem perm check")
   };
 
-  let ext_ptw = ext_accum_ptw_result(ext_ptw, pte_chk);
-  if succ then PTE_Check_Success(ext_ptw) else PTE_Check_Failure(ext_ptw)
+  if succ then PTE_Check_Success(ext_ptw') else PTE_Check_Failure(ext_ptw')
 }
 
 function update_PTE_Bits(p : PTE_Bits, a : AccessType(ext_access_type), ext : extPte) -> option((PTE_Bits, extPte)) = {
