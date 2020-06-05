@@ -43,15 +43,55 @@ bitfield PTE_Bits : pteAttribs = {
  * bits (and sccsr.gclg[su]); that is, we permit relaxing only the dependence
  * on the tag bit itself.
  *
- * There are no such bits on RV32/SV32, so we hard-code both StoreCap=1
- * and LoadCap=1 LC_Mod=0 LC_Gen=0 (i.e., there is no ability to disable
- * capability loads from or stores to pages in the SV32 MMU).
+ * While for StoreCap* the behaviors are as follows.
+ *
+ *   SC   SC_Mod  Action
+ *
+ *    0      0    Trap on tagged capability store
+ *    0      1    CAS the PTE to SC=1, SC_Mod=1 (i.e., set both bits)
+ *
+ *    1      0    [Reserved]
+ *    1      1    Permit tagged capability store
+ *
+ * It is permitted for implementations to ignore SC_Mod and behave as if it
+ * were always 0, at the expense of traps on cap-dirtying stores.  Note that SC
+ * and SC_Mod are not quite like W and D: SC is both the permission and dirty
+ * bit; SC_Mod just encapsulates a particular trap handler behavior.
+ * permitting SC_Mod to be treated as always zero means fewer things to
+ * initially implement.
+ *
+ * The SC=0 SC_Mod=1 behavior is described as a CAS of the PTE to close race
+ * conditions, much as with W and D.  Should the TLB have this state cached
+ * and then observe a SC=1 SC_Mod=1 PTE, no PTE write is necessary.  On the
+ * other hand, if SC=0 SC_Mod=0 is observed, the store operation must trap
+ * rather than transition the PTE to SC=1 SC_Mod=1 (or SC=1 SC_Mod=0).
+ *
+ * DATA DEPENDENCE: The data-dependent behavior of SC_Mod is difficult to model
+ * in the current sail RISC-V formal model in all cases: we here in the PTW are
+ * not given any more insight into the memory transaction than its type and, in
+ * particular, we cannot see the stored tag of a Write(Cap) or ReadWrite(Cap)
+ * transaction. Sore instructions can somewhat abusively use the tag to
+ * discriminate between Write(Cap) and Write(Data) transaction types even when
+ * the instruction itself is capable of storing a capability.  However, for
+ * ReadWrite(Cap), there is no easy way to say what we might mean.  Therefore,
+ * we take any Cap-storing transaction as grounds to mark the page dirty, even
+ * if no capability was transferred. (In fact, in the case of ReadWrite(Cap),
+ * the load may fault due to LC_Mod gating, and so perhaps no store transaction
+ * takes place at all; even in this case, SC_Mod may still assert SC!) Other
+ * microarchitectural implementations are free to behave similarly or to
+ * provide the narrower interpretation of SC_Mod and require that the tag bit
+ * actually be set before dirtying the page.
+ *
+ * SV32: There are no extension bits available, so we hard-code the result to
+ * be LC=1 LC_Mod=0 LC_Gen=0 (loads succeed and preserve tags, LCG mechanism
+ * not enabled) and SC=1 SC_Mod=1 (stores succeed).
  */
 type extPte = bits(10)
 
 bitfield Ext_PTE_Bits : extPte = {
   StoreCap     : 9, /* Permit capability stores */
   LoadCap      : 8, /* Permit capability loads */
+  StoreCap_Mod : 7, /* Modify capability store prohibition; see above table */
   LoadCap_Mod  : 6, /* Modify capability load prohibition; see above table */
   LoadCap_Gen  : 5, /* When load-cap gens. are in use, the "local" gen. bit */
 }
@@ -94,10 +134,18 @@ function checkPTEPermission_LC_caveat(p, e) =
               else PTW_LCM_TRAP
        }
 
+val checkPTEPermission_SC_caveat : Ext_PTE_Bits -> ext_ptw_scm
+function checkPTEPermission_SC_caveat(e) =
+  match (e.StoreCap(), e.StoreCap_Mod()) {
+    (0b1, _)   => PTW_SCM_OK,   /* Permitted */
+    (0b0, 0b0) => PTW_SCM_TRAP, /* Forbidden, unmodified */
+    (0b0, 0b1) => PTW_SCM_OK    /* Forbidden, modified; see update_PTE_bits */
+  }
+
 function checkPTEPermission(ac : AccessType(ext_access_type), priv : Privilege, mxr : bool, do_sum : bool, p : PTE_Bits, ext : extPte, ext_ptw : ext_ptw) -> PTE_Check = {
   let    e = Mk_Ext_PTE_Bits(ext);
   let lcav = checkPTEPermission_LC_caveat(p, e);
-  let scav = if e.StoreCap() == 0b1 then PTW_SCM_OK else PTW_SCM_TRAP;
+  let scav = checkPTEPermission_SC_caveat(e);
   let (succ, ext_ptw') : (bool, ext_ptw) =
   match (ac, priv) {
     (Read(Data),      User)       => (p.U() == 0b1 & (p.R() == 0b1 | (p.X() == 0b1 & mxr)), ext_ptw),
@@ -171,9 +219,22 @@ function update_PTE_Bits(p : PTE_Bits, a : AccessType(ext_access_type), ext : ex
   // accessed bit
   let update_a = p.A() == 0b0;
 
-  if update_d | update_a then {
+  let eb = Mk_Ext_PTE_Bits(ext);
+
+  // store cap bits
+  let update_sc = eb.StoreCap() == 0b0 & eb.StoreCap_Mod() == 0b1
+                  & (match a {
+                     Write(Cap)     => true,
+                     ReadWrite(Cap) => true,
+                     _              => false
+                  });
+
+  if update_d | update_a | update_sc then {
     let np = update_A(p, 0b1);
     let np = if update_d then update_D(np, 0b1) else np;
-    Some(np, ext)
+    let ne = if update_sc
+             then update_StoreCap_Mod(update_StoreCap(eb, 0b1), 0b1)
+             else eb;
+    Some(np, ne.bits())
   } else None()
 }
