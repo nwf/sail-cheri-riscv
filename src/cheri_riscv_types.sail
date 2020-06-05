@@ -11,7 +11,10 @@ enum ext_ptw_lcm = {
   PTW_LCM_OK,
 
   /* PTE settings require clearing tags */
-  PTW_LCM_CLR
+  PTW_LCM_CLR,
+
+  /* PTE settings require us to trap */
+  PTW_LCM_TRAP
 }
 
 enum ext_ptw_scm = {
@@ -35,7 +38,12 @@ function ext_ptw_join_lcm(e : ext_ptw, l : ext_ptw_lcm) -> ext_ptw =
   { e with ptw_lc_mod =
       match l {
         PTW_LCM_OK => e.ptw_lc_mod,
-        PTW_LCM_CLR => l
+        PTW_LCM_CLR => match e.ptw_lc_mod {
+                         PTW_LCM_OK => PTW_LCM_CLR,
+                         PTW_LCM_CLR => PTW_LCM_CLR,
+                         PTW_LCM_TRAP => PTW_LCM_TRAP
+                       },
+        PTW_LCM_TRAP => PTW_LCM_TRAP
       }
   }
 

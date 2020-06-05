@@ -32,6 +32,22 @@
 /*  SUCH DAMAGE.                                                          */
 /*========================================================================*/
 
+/*
+ * Flags that switch between permitted behaviors.  These should be exported to
+ * the models as tunables, but right now the only way to easily do that is
+ * with Sail "extern" functions and that requires more code than it seems like
+ * this should.
+ */
+
+  /*
+   * Are we permitted to look at the tag being loaded before deciding to
+   * trap?  This is possibly tricky, microarchitecturally, as it means we
+   * must retain sufficient state for loads waiting for completion.  Some
+   * high-performance microarchitectures capitalize on loads being guaranteed
+   * not to (precisely) trap after the TLB/PTW signs off on an address.
+   */
+let load_cap_data_dep_trap : bool = true
+
 /* Operations that extract parts of a capability into GPR */
 
 union clause ast = CGetPerm   : (regidx, regidx)
@@ -926,6 +942,21 @@ function clause execute (CLoadCap(rd, cs, is_unsigned, width)) =
   handle_load_data_via_cap(rd, 0b0 @ cs, cap_val, vaddr, is_unsigned, width)
 }
 
+union load_cap_ptw_ext_result = {
+  LCPE_OK : Capability,
+  LCPE_Exn : CapEx
+}
+
+val handle_load_cap_ptw_ext : (Capability, bool, ext_ptw_lcm) -> load_cap_ptw_ext_result
+function handle_load_cap_ptw_ext (v, vialc, ptw_info) =
+  if   v.tag == false
+  then LCPE_OK(v)
+  else match ptw_info {
+         PTW_LCM_OK => LCPE_OK({v with tag = v.tag & vialc}),
+         PTW_LCM_CLR => LCPE_OK({v with tag = false}),
+         PTW_LCM_TRAP => LCPE_Exn(CapEx_CapLoadGen)
+       }
+
 val handle_load_cap_via_cap : (regidx, capreg_idx, Capability, xlenbits) -> Retired effect {escape, rmem, rmemt, rreg, wmv, wmvt, wreg}
 function handle_load_cap_via_cap(rd, cs, cap_val, vaddrBits) = {
   let aq : bool = false;
@@ -948,17 +979,24 @@ function handle_load_cap_via_cap(rd, cs, cap_val, vaddrBits) = {
   } else match translateAddr(vaddrBits, Read(Cap)) {
     TR_Failure(E_Extension(_), _) => { internal_error("unexpected cheri exception for cap load") },
     TR_Failure(e, _) => { handle_mem_exception(vaddrBits, e); RETIRE_FAIL },
-    TR_Address(addr, ptw_info) => {
-      let c = mem_read_cap(addr, aq, rl, false);
-      match c {
-        MemValue(v) => {
-          let cr = if   ptw_info.ptw_lc_mod == PTW_LCM_CLR
-                   then {v with tag = false} /* strip the tag */
-                   else {v with tag = v.tag & cap_val.permit_load_cap};
-          writeCapReg(rd, cr);
-          RETIRE_SUCCESS
-        },
-        MemException(e) => {handle_mem_exception(vaddrBits, e); RETIRE_FAIL }
+    TR_Address(addr, ext_ptw) => {
+      let vialc : bool = cap_val.permit_load_cap;
+      let lcav : ext_ptw_lcm = ext_ptw.ptw_lc_mod;
+
+      if ~(load_cap_data_dep_trap) & vialc & lcav == PTW_LCM_TRAP then {
+        /* If we're not permitted to do tag-dependent traps, trap now */
+        handle_cheri_cap_exception(CapEx_CapLoadGen, cs); RETIRE_FAIL
+      } else {
+        let c = mem_read_cap(addr, aq, rl, false);
+        match c {
+          MemValue(v) => {
+            match handle_load_cap_ptw_ext(v, vialc, lcav) {
+              LCPE_OK(v') => { writeCapReg(rd, v'); RETIRE_SUCCESS },
+              LCPE_Exn(e) => { handle_cheri_cap_exception(e, cs); RETIRE_FAIL }
+            }
+          },
+          MemException(e) => {handle_mem_exception(vaddrBits, e); RETIRE_FAIL }
+        }
       }
     }
   }
@@ -1046,21 +1084,24 @@ if not(cap_val.tag) then {
   } else match translateAddr(vaddrBits, Read(Cap)) {
     TR_Failure(E_Extension(_), _) => { internal_error("unexpected cheri exception for cap load") },
     TR_Failure(e, _) => { handle_mem_exception(vaddrBits, e); RETIRE_FAIL },
-    TR_Address(addr, ptw_info) => {
-      let c = mem_read_cap(addr, aq, rl, false);
-      match c {
-        MemValue(v) => {
-          let cr = if   ptw_info.ptw_lc_mod == PTW_LCM_CLR
-                   then {v with tag = false} /* strip the tag */
-                   else {
-                     /* the Sail model currently reserves virtual addresses */
-                     load_reservation(addr);
-                     {v with tag = v.tag & cap_val.permit_load_cap}
-                   };
-          writeCapReg(cd, cr);
-          RETIRE_SUCCESS
-        },
-        MemException(e) => {handle_mem_exception(vaddrBits, e); RETIRE_FAIL }
+    TR_Address(addr, ext_ptw) => {
+      let vialc : bool = cap_val.permit_load_cap;
+      let lcav : ext_ptw_lcm = ext_ptw.ptw_lc_mod;
+
+      if ~(load_cap_data_dep_trap) & vialc & lcav == PTW_LCM_TRAP then {
+        /* If we're not permitted to do tag-dependent traps, trap now */
+        handle_cheri_cap_exception(CapEx_CapLoadGen, cs); RETIRE_FAIL
+      } else {
+        let c = mem_read_cap(addr, aq, rl, false);
+        match c {
+          MemValue(v) => {
+            match handle_load_cap_ptw_ext(v, vialc, lcav) {
+              LCPE_OK(v') => { load_reservation(addr); writeCapReg(cd, v'); RETIRE_SUCCESS },
+              LCPE_Exn(e) => { handle_cheri_cap_exception(e, cs); RETIRE_FAIL }
+            }
+          },
+          MemException(e) => {handle_mem_exception(vaddrBits, e); RETIRE_FAIL }
+        }
       }
     }
   }

@@ -5,6 +5,8 @@
 bitfield ccsr : xlenbits = {
   cap_idx : 15 .. 10,
   cause   :  9 .. 5, /* cap cause */
+  gclgu   :  3,      /* Global Cap Load Gen bit for User pages */
+  gclgs   :  2,      /* Global Cap Load Gen bit for System (not User) pages */
   d       :  1,      /* dirty  */
   e       :  0       /* enable */
 }
