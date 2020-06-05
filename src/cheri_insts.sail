@@ -926,6 +926,21 @@ function clause execute (CLoadCap(rd, cs, is_unsigned, width)) =
   handle_load_data_via_cap(rd, 0b0 @ cs, cap_val, vaddr, is_unsigned, width)
 }
 
+union load_cap_ptw_ext_result = {
+  LCPE_OK : Capability,
+  LCPE_Exn : ExceptionType
+}
+
+val handle_load_cap_ptw_ext : (Capability, bool, ext_ptw_lcm) -> load_cap_ptw_ext_result
+function handle_load_cap_ptw_ext (v, vialc, ptw_info) =
+  if   v.tag == false
+  then LCPE_OK(v)
+  else match ptw_info {
+         PTW_LCM_OK => LCPE_OK({v with tag = v.tag & vialc}),
+         PTW_LCM_CLR => LCPE_OK({v with tag = false}),
+         PTW_LCM_TRAP => LCPE_Exn(E_Extension(EXC_LOAD_CAP_PAGE_FAULT))
+       }
+
 val handle_load_cap_via_cap : (regidx, capreg_idx, Capability, xlenbits) -> Retired effect {escape, rmem, rmemt, rreg, wmv, wmvt, wreg}
 function handle_load_cap_via_cap(rd, cs, cap_val, vaddrBits) = {
   let aq : bool = false;
@@ -949,14 +964,16 @@ function handle_load_cap_via_cap(rd, cs, cap_val, vaddrBits) = {
     TR_Failure(E_Extension(_), _) => { internal_error("unexpected cheri exception for cap load") },
     TR_Failure(e, _) => { handle_mem_exception(vaddrBits, e); RETIRE_FAIL },
     TR_Address(addr, ptw_info) => {
+      let vialc : bool = cap_val.permit_load_cap;
+      let lcav : ext_ptw_lcm = ptw_info.ptw_lc_mod;
+
       let c = mem_read_cap(addr, aq, rl, false);
       match c {
         MemValue(v) => {
-          let cr = if   ptw_info.ptw_lc_mod == PTW_LCM_CLR
-                   then {v with tag = false} /* strip the tag */
-                   else {v with tag = v.tag & cap_val.permit_load_cap};
-          writeCapReg(rd, cr);
-          RETIRE_SUCCESS
+          match handle_load_cap_ptw_ext(v, vialc, lcav) {
+            LCPE_OK(v') => { writeCapReg(rd, v'); RETIRE_SUCCESS },
+            LCPE_Exn(e) => { handle_mem_exception(vaddrBits, e); RETIRE_FAIL }
+          }
         },
         MemException(e) => {handle_mem_exception(vaddrBits, e); RETIRE_FAIL }
       }
@@ -1047,18 +1064,16 @@ if not(cap_val.tag) then {
     TR_Failure(E_Extension(_), _) => { internal_error("unexpected cheri exception for cap load") },
     TR_Failure(e, _) => { handle_mem_exception(vaddrBits, e); RETIRE_FAIL },
     TR_Address(addr, ptw_info) => {
+      let vialc : bool = cap_val.permit_load_cap;
+      let lcav : ext_ptw_lcm = ptw_info.ptw_lc_mod;
+
       let c = mem_read_cap(addr, aq, rl, false);
       match c {
         MemValue(v) => {
-          let cr = if   ptw_info.ptw_lc_mod == PTW_LCM_CLR
-                   then {v with tag = false} /* strip the tag */
-                   else {
-                     /* the Sail model currently reserves virtual addresses */
-                     load_reservation(addr);
-                     {v with tag = v.tag & cap_val.permit_load_cap}
-                   };
-          writeCapReg(cd, cr);
-          RETIRE_SUCCESS
+          match handle_load_cap_ptw_ext(v, vialc, lcav) {
+            LCPE_OK(v') => { load_reservation(addr); writeCapReg(cd, v'); RETIRE_SUCCESS },
+            LCPE_Exn(e) => { handle_mem_exception(vaddrBits, e); RETIRE_FAIL }
+          }
         },
         MemException(e) => {handle_mem_exception(vaddrBits, e); RETIRE_FAIL }
       }
