@@ -944,7 +944,7 @@ function clause execute (CLoadCap(rd, cs, is_unsigned, width)) =
 
 union load_cap_ptw_ext_result = {
   LCPE_OK : Capability,
-  LCPE_Exn : CapEx
+  LCPE_Exn : ExceptionType
 }
 
 val handle_load_cap_ptw_ext : (Capability, bool, ext_ptw_lcm) -> load_cap_ptw_ext_result
@@ -954,7 +954,7 @@ function handle_load_cap_ptw_ext (v, vialc, ptw_info) =
   else match ptw_info {
          PTW_LCM_OK => LCPE_OK({v with tag = v.tag & vialc}),
          PTW_LCM_CLR => LCPE_OK({v with tag = false}),
-         PTW_LCM_TRAP => LCPE_Exn(CapEx_CapLoadGen)
+         PTW_LCM_TRAP => LCPE_Exn(E_Extension(EXC_CHERI_MMU_LOAD_CAP))
        }
 
 val handle_load_cap_via_cap : (regidx, capreg_idx, Capability, xlenbits) -> Retired effect {escape, rmem, rmemt, rreg, wmv, wmvt, wreg}
@@ -985,14 +985,15 @@ function handle_load_cap_via_cap(rd, cs, cap_val, vaddrBits) = {
 
       if ~(load_cap_data_dep_trap) & vialc & lcav == PTW_LCM_TRAP then {
         /* If we're not permitted to do tag-dependent traps, trap now */
-        handle_cheri_cap_exception(CapEx_CapLoadGen, cs); RETIRE_FAIL
+        handle_mem_exception(vaddrBits, E_Extension(EXC_CHERI_MMU_LOAD_CAP));
+        RETIRE_FAIL
       } else {
         let c = mem_read_cap(addr, aq, rl, false);
         match c {
           MemValue(v) => {
             match handle_load_cap_ptw_ext(v, vialc, lcav) {
               LCPE_OK(v') => { writeCapReg(rd, v'); RETIRE_SUCCESS },
-              LCPE_Exn(e) => { handle_cheri_cap_exception(e, cs); RETIRE_FAIL }
+              LCPE_Exn(e) => { handle_mem_exception(vaddrBits, e); RETIRE_FAIL }
             }
           },
           MemException(e) => {handle_mem_exception(vaddrBits, e); RETIRE_FAIL }
@@ -1090,14 +1091,15 @@ if not(cap_val.tag) then {
 
       if ~(load_cap_data_dep_trap) & vialc & lcav == PTW_LCM_TRAP then {
         /* If we're not permitted to do tag-dependent traps, trap now */
-        handle_cheri_cap_exception(CapEx_CapLoadGen, cs); RETIRE_FAIL
+        handle_mem_exception(vaddrBits, E_Extension(EXC_CHERI_MMU_LOAD_CAP));
+        RETIRE_FAIL
       } else {
         let c = mem_read_cap(addr, aq, rl, false);
         match c {
           MemValue(v) => {
             match handle_load_cap_ptw_ext(v, vialc, lcav) {
               LCPE_OK(v') => { load_reservation(addr); writeCapReg(cd, v'); RETIRE_SUCCESS },
-              LCPE_Exn(e) => { handle_cheri_cap_exception(e, cs); RETIRE_FAIL }
+              LCPE_Exn(e) => { handle_mem_exception(vaddrBits, e); RETIRE_FAIL }
             }
           },
           MemException(e) => {handle_mem_exception(vaddrBits, e); RETIRE_FAIL }
@@ -1248,8 +1250,8 @@ function handle_store_cap_via_cap(rs, cs, cap_val, vaddrBits) = {
     handle_mem_exception(vaddrBits, E_SAMO_Addr_Align());
     RETIRE_FAIL
   } else match translateAddr(vaddrBits, Write(if rs_val.tag then Cap else Data)) {
-    TR_Failure(E_Extension(EXC_CHERI_VMEM_STORE_CAP), _) => {
-      handle_cheri_cap_exception(CapEx_MMUNoStoreCap, cs);
+    TR_Failure(E_Extension(EXC_CHERI_MMU_STORE_CAP), _) => {
+      handle_mem_exception(vaddrBits, E_Extension(EXC_CHERI_MMU_STORE_CAP));
       RETIRE_FAIL
     },
     TR_Failure(E_Extension(_), _) => { internal_error("unexpected cheri exception for cap store") },
@@ -1257,7 +1259,7 @@ function handle_store_cap_via_cap(rs, cs, cap_val, vaddrBits) = {
     TR_Address(addr, caveats) => {
       match (caveats.ptw_sc_mod, rs_val.tag) {
         (PTW_SCM_TRAP, true) => {
-          handle_cheri_cap_exception(CapEx_MMUNoStoreCap, cs);
+          handle_mem_exception(vaddrBits, E_Extension(EXC_CHERI_MMU_STORE_CAP));
           RETIRE_FAIL
         },
         _ => {
@@ -1405,7 +1407,7 @@ function handle_store_cond_cap_via_cap(cs2, cs, cap_val, vaddrBits) = {
   } else {
     match translateAddr(vaddrBits, Write(if cs2_val.tag then Cap else Data)) {
       TR_Failure(E_Extension(EXC_CHERI_VMEM_STORE_CAP), _) => {
-        handle_cheri_cap_exception(CapEx_MMUNoStoreCap, cs);
+        handle_mem_exception(vaddrBits, E_Extension(EXC_CHERI_MMU_STORE_CAP));
         RETIRE_FAIL
       },
       TR_Failure(E_Extension(_), _) => { internal_error("unexpected cheri exception for cap store") },
@@ -1413,7 +1415,7 @@ function handle_store_cond_cap_via_cap(cs2, cs, cap_val, vaddrBits) = {
       TR_Address(addr, caveats) => {
         match (caveats.ptw_sc_mod, cs2_val.tag) {
           (PTW_SCM_TRAP, true) => {
-            handle_cheri_cap_exception(CapEx_MMUNoStoreCap, cs);
+            handle_mem_exception(vaddrBits, E_Extension(EXC_CHERI_MMU_STORE_CAP));
             RETIRE_FAIL
           },
           _ => {

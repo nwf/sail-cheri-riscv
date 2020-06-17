@@ -61,28 +61,57 @@ let init_ext_ptw : ext_ptw = struct {
   ptw_sc_mod = PTW_SCM_OK
 }
 
-/* Address translation errors */
-enum ext_ptw_error = {AT_LOAD_CAP_ERR, AT_STORE_CAP_ERR}
+/*
+ * Address translation errors
+ *
+ * For CHERI, these are defined but not used at present: our PTE extensions
+ * are defined here in a data-dependent way.  In some eventuality, perhaps
+ * we'll have this kind of data-independence as well, so it doesn't hurt to
+ * keep the symbols around.
+ */
+enum ext_ptw_error = {
+  AT_LOAD_CAP_ERR,
+  AT_STORE_CAP_ERR
+}
 
 /* CHERI exception extensions */
 
-enum ext_exc_type = {EXC_CHERI, EXC_CHERI_VMEM_LOAD_CAP, EXC_CHERI_VMEM_STORE_CAP}
+enum ext_exc_type = {
+  EXC_CHERI,
+  EXC_CHERI_MMU_LOAD_CAP,
+  EXC_CHERI_MMU_STORE_CAP
+}
 
 /* CHERI translation of PTW errors into exception annotations */
 function ext_translate_exception(e : ext_ptw_error) -> ext_exc_type =
   match e {
-    AT_LOAD_CAP_ERR  => EXC_CHERI_VMEM_LOAD_CAP,
-    AT_STORE_CAP_ERR => EXC_CHERI_VMEM_STORE_CAP
+    AT_LOAD_CAP_ERR  => EXC_CHERI_MMU_LOAD_CAP,
+    AT_STORE_CAP_ERR => EXC_CHERI_MMU_STORE_CAP
 }
 
 /* CHERI conversion of extension exceptions to bits */
 val ext_exc_type_to_bits : ext_exc_type -> exc_code
-function ext_exc_type_to_bits(e) = 0x1C
+function ext_exc_type_to_bits(e) =
+  match e {
+    EXC_CHERI_MMU_LOAD_CAP  => 0x1A,
+    EXC_CHERI_MMU_STORE_CAP => 0x1B,
+    _                       => 0x1C
+  }
 
 /* CHERI conversion of extension exceptions to integers */
 val num_of_ext_exc_type : ext_exc_type -> {'n, (0 <= 'n < xlen). int('n)}
-function num_of_ext_exc_type(e) = 28
+function num_of_ext_exc_type(e) =
+  match e {
+    EXC_CHERI_MMU_LOAD_CAP  => 26,
+    EXC_CHERI_MMU_STORE_CAP => 27,
+    _                       => 28
+  }
 
 /* CHERI conversion of extension exceptions to strings */
 val ext_exc_type_to_str : ext_exc_type -> string
-function ext_exc_type_to_str(e) = "cheri-exception"
+function ext_exc_type_to_str(e) =
+  match e {
+    EXC_CHERI_MMU_LOAD_CAP  => "cheri-mmu-cap-load",
+    EXC_CHERI_MMU_STORE_CAP => "cheri-mmu-cap-store",
+    _                       => "cheri-exception"
+  }

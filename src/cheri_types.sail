@@ -65,7 +65,6 @@ enum CapEx = {
   CapEx_ReturnTrap,
   CapEx_TSSUnderFlow,
   CapEx_UserDefViolation,
-  CapEx_MMUNoStoreCap,
   CapEx_InexactBounds,
   CapEx_UnalignedBase,
   CapEx_GlobalViolation,
@@ -80,8 +79,7 @@ enum CapEx = {
   CapEx_PermitCCallViolation,
   CapEx_AccessCCallIDCViolation,
   CapEx_PermitUnsealViolation,
-  CapEx_PermitSetCIDViolation,
-  CapEx_CapLoadGen
+  CapEx_PermitSetCIDViolation
 }
 
 function CapExCode(ex) : CapEx -> bits(5) =
@@ -95,7 +93,7 @@ function CapExCode(ex) : CapEx -> bits(5) =
     CapEx_ReturnTrap                    => 0b00110,
     CapEx_TSSUnderFlow                  => 0b00111,
     CapEx_UserDefViolation              => 0b01000,
-    CapEx_MMUNoStoreCap                 => 0b01001,
+    /* 0b01001 unused; was CapEx_MMUNoStoreCap */
     CapEx_InexactBounds                 => 0b01010,
     CapEx_UnalignedBase                 => 0b01011,
     CapEx_GlobalViolation               => 0b10000,
@@ -110,8 +108,7 @@ function CapExCode(ex) : CapEx -> bits(5) =
     CapEx_PermitCCallViolation          => 0b11001,
     CapEx_AccessCCallIDCViolation       => 0b11010,
     CapEx_PermitUnsealViolation         => 0b11011,
-    CapEx_PermitSetCIDViolation         => 0b11100,
-    CapEx_CapLoadGen                    => 0b11101
+    CapEx_PermitSetCIDViolation         => 0b11100
   }
 
 function string_of_capex (ex) : CapEx -> string =
@@ -125,7 +122,6 @@ function string_of_capex (ex) : CapEx -> string =
     CapEx_ReturnTrap                    => "ReturnTrap"                  ,
     CapEx_TSSUnderFlow                  => "TSSUnderFlow"                ,
     CapEx_UserDefViolation              => "UserDefViolation"            ,
-    CapEx_MMUNoStoreCap                 => "MMUNoStoreCap"               ,
     CapEx_InexactBounds                 => "InexactBounds"               ,
     CapEx_UnalignedBase                 => "UnalignedBounds"             ,
     CapEx_GlobalViolation               => "GlobalViolation"             ,
@@ -140,8 +136,7 @@ function string_of_capex (ex) : CapEx -> string =
     CapEx_PermitCCallViolation          => "PermitCCallViolation"        ,
     CapEx_AccessCCallIDCViolation       => "AccessCCallIDCViolation"     ,
     CapEx_PermitUnsealViolation         => "PermitUnsealViolation"       ,
-    CapEx_PermitSetCIDViolation         => "PermitSetCIDViolation"       ,
-    CapEx_CapLoadGen                    => "CapLoadGen"
+    CapEx_PermitSetCIDViolation         => "PermitSetCIDViolation"
   }
 
 type capreg_idx = bits(6)
