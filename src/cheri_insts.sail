@@ -1249,7 +1249,7 @@ function handle_store_cap_via_cap(rs, cs, cap_val, vaddrBits) = {
     RETIRE_FAIL
   } else match translateAddr(vaddrBits, Write(if rs_val.tag then Cap else Data)) {
     TR_Failure(E_Extension(EXC_CHERI_VMEM_STORE_CAP), _) => {
-      handle_cheri_cap_exception(CapEx_TLBNoStoreCap, cs);
+      handle_cheri_cap_exception(CapEx_MMUNoStoreCap, cs);
       RETIRE_FAIL
     },
     TR_Failure(E_Extension(_), _) => { internal_error("unexpected cheri exception for cap store") },
@@ -1257,7 +1257,7 @@ function handle_store_cap_via_cap(rs, cs, cap_val, vaddrBits) = {
     TR_Address(addr, caveats) => {
       match (caveats.ptw_sc_mod, rs_val.tag) {
         (PTW_SCM_TRAP, true) => {
-          handle_cheri_cap_exception(CapEx_TLBNoStoreCap, cs);
+          handle_cheri_cap_exception(CapEx_MMUNoStoreCap, cs);
           RETIRE_FAIL
         },
         _ => {
@@ -1405,7 +1405,7 @@ function handle_store_cond_cap_via_cap(cs2, cs, cap_val, vaddrBits) = {
   } else {
     match translateAddr(vaddrBits, Write(if cs2_val.tag then Cap else Data)) {
       TR_Failure(E_Extension(EXC_CHERI_VMEM_STORE_CAP), _) => {
-        handle_cheri_cap_exception(CapEx_TLBNoStoreCap, cs);
+        handle_cheri_cap_exception(CapEx_MMUNoStoreCap, cs);
         RETIRE_FAIL
       },
       TR_Failure(E_Extension(_), _) => { internal_error("unexpected cheri exception for cap store") },
@@ -1413,7 +1413,7 @@ function handle_store_cond_cap_via_cap(cs2, cs, cap_val, vaddrBits) = {
       TR_Address(addr, caveats) => {
         match (caveats.ptw_sc_mod, cs2_val.tag) {
           (PTW_SCM_TRAP, true) => {
-            handle_cheri_cap_exception(CapEx_TLBNoStoreCap, cs);
+            handle_cheri_cap_exception(CapEx_MMUNoStoreCap, cs);
             RETIRE_FAIL
           },
           _ => {
