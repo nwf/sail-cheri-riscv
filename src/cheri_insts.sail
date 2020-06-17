@@ -1226,7 +1226,7 @@ function handle_store_cap_via_cap(rs, cs, cap_val, vaddrBits) = {
     TR_Address(addr, caveats) => {
       match (caveats.ptw_sc_mod, rs_val.tag) {
         (PTW_SCM_TRAP, true) => {
-          handle_cheri_cap_exception(CapEx_TLBNoStoreCap, cs);
+          handle_cheri_cap_exception(CapEx_MMUNoStoreCap, cs);
           RETIRE_FAIL
         },
         _ => {
@@ -1377,7 +1377,7 @@ function handle_store_cond_cap_via_cap(cs2, cs, cap_val, vaddrBits) = {
       TR_Address(addr, caveats) => {
         match (caveats.ptw_sc_mod, cs2_val.tag) {
           (PTW_SCM_TRAP, true) => {
-            handle_cheri_cap_exception(CapEx_TLBNoStoreCap, cs);
+            handle_cheri_cap_exception(CapEx_MMUNoStoreCap, cs);
             RETIRE_FAIL
           },
           _ => {
