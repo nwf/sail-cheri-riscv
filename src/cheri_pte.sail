@@ -96,6 +96,16 @@ bitfield Ext_PTE_Bits : extPte = {
   LoadCap_Gen  : 5, /* When load-cap gens. are in use, the "local" gen. bit */
 }
 
+/*
+ * StoreCap     = 1,
+ * LoadCap      = 1,
+ * StoreCap_Mod = 0,
+ * LoadCap_Mod  = 0,
+ * LoadCap_Gen  = 0,
+ * bits 0 .. 4  = 0
+ */
+let default_sv32_ext_pte : extPte = 0b1100000000
+
 function isPTEPtr(p : pteAttribs, ext : extPte) -> bool = {
   let a = Mk_PTE_Bits(p);
   a.R() == 0b0 & a.W() == 0b0 & a.X() == 0b0
