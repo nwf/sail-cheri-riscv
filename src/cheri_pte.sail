@@ -48,10 +48,10 @@ bitfield PTE_Bits : pteAttribs = {
  *   SC   SC_Mod  Action
  *
  *    0      0    Trap on tagged capability store
- *    0      1    CAS the PTE to SC=1, SC_Mod=1 (i.e., set both bits)
+ *    0      1    CAS the PTE to SC=1, SC_Mod=0
  *
- *    1      0    [Reserved]
- *    1      1    Permit tagged capability store
+ *    1      0    Permit tagged capability store
+ *    1      1    [reserved]
  *
  * It is permitted for implementations to ignore SC_Mod and behave as if it
  * were always 0, at the expense of traps on cap-dirtying stores.  Note that SC
@@ -62,9 +62,9 @@ bitfield PTE_Bits : pteAttribs = {
  *
  * The SC=0 SC_Mod=1 behavior is described as a CAS of the PTE to close race
  * conditions, much as with W and D.  Should the TLB have this state cached
- * and then observe a SC=1 SC_Mod=1 PTE, no PTE write is necessary.  On the
+ * and then observe a SC=1 SC_Mod=X PTE, no PTE write is necessary.  On the
  * other hand, if SC=0 SC_Mod=0 is observed, the store operation must trap
- * rather than transition the PTE to SC=1 SC_Mod=1 (or SC=1 SC_Mod=0).
+ * rather than transition the PTE to SC=1 SC_Mod=X.
  *
  * DATA DEPENDENCE: The data-dependent behavior of SC_Mod is difficult to model
  * in the current sail RISC-V formal model in all cases: we here in the PTW are
@@ -84,7 +84,7 @@ bitfield PTE_Bits : pteAttribs = {
  *
  * SV32: There are no extension bits available, so we hard-code the result to
  * be LC=1 LC_Mod=0 LC_Gen=0 (loads succeed and preserve tags, LCG mechanism
- * not enabled) and SC=1 SC_Mod=1 (stores succeed).
+ * not enabled) and SC=1 SC_Mod=0 (stores succeed).
  */
 type extPte = bits(10)
 
@@ -227,7 +227,7 @@ function update_PTE_Bits(p : PTE_Bits, a : AccessType(ext_access_type), ext : ex
     let np = update_A(p, 0b1);
     let np = if update_d then update_D(np, 0b1) else np;
     let ne = if update_sc
-             then update_StoreCap_Mod(update_StoreCap(eb, 0b1), 0b1)
+             then update_StoreCap_Mod(update_StoreCap(eb, 0b1), 0b0)
              else eb;
     Some(np, ne.bits())
   } else None()
