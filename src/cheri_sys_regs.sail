@@ -48,6 +48,83 @@ function clause ext_is_CSR_defined (0x8C0, p) = haveUsrMode()  // uccsr
 function clause ext_is_CSR_defined (0x9C0, p) = haveSupMode() & (p == Machine | p == Supervisor) // sccsr
 function clause ext_is_CSR_defined (0xBC0, p) = p == Machine | p == Supervisor // mccsr
 
+/*
+ * Bits of CHERI that get rolled out across implementations slowly.
+ *
+ * Implementations may pick which subset of flavors they choose; this may be a
+ * singleton, in which case all WARL fields are basically RO.
+ */
+bitfield scisa : xlenbits = {
+  /*
+   * SV{39,48,56} PTE Store-Cap control bits (SC, SC_Mod) are tag-bit
+   * dependent.  WARL
+   *
+   * If 0, any capability-store-capable instruction will trap or write-back to
+   * the PTE, as if the instruction were storing an asserted tag, if the PTE
+   * SC/SC_Mod bits indicate to do so.
+   *
+   * If 1, capability-store-capable instructions communicate the tag they are
+   * storing to the PTW, so only stores of asserted tags will trigger
+   * SC/SC_mod-mediated traps or writeback
+   */
+  pte_cap_sc_datadep : 2,
+
+  /*
+   * SV{39,48,56} PTE Load-Cap control bits (LC, LC_Mod, LC_Gen) are tag-bit
+   * dependent.  WARL
+   *
+   * If 0, any capability-load-capable instruction will trap, as if the loaded
+   * data contained an asserted tag, if the PTE LC/LC_Mod/LC_Gen/gclg[us] bits
+   * indicate to do so.
+   *
+   * If 1, capability-load-capable instructions will receive "caveated" successful
+   * translations from the PTW and will inspect the loaded tag and caveat and
+   * raise traps as merited.
+   */
+  pte_cap_lc_datadep : 1,
+
+  /*
+   * SV{39,48,56} PTEs are extended with Cap load/store modify flags.  WARL.
+   *
+   * If 0, only SC and LC bits will be used and any set SC_Mod, LC_Mod, or
+   * LC_Gen bit will result in a PTW_Invalid_PTE trap.  gclgu and gclgs
+   * are ignored.
+   *
+   * If 1, SC_Mod, LC_Mod, and LC_Gen bits are understood and will be used
+   * by the PTW.  gclgu and gclgs are used as defined.
+   */
+  pte_cap_lsmod : 0
+}
+
+register scisa : scisa
+
+function legalize_scisa(c : scisa, v : xlenbits) -> scisa = {
+  let v = Mk_scisa(v);
+
+  /*
+   * This implementation understands all flavors of PTE LC/SC control in cisa.
+   *
+   * Setting lsmod to 0 means that the datadep bits are meaningless, so force
+   * them to 0, too.
+   */
+  let c = update_pte_cap_lsmod(c, v.pte_cap_lsmod());
+  let c = if c.pte_cap_lsmod() == 0b1 then {
+            let c = update_pte_cap_lc_datadep(c, v.pte_cap_lc_datadep());
+            update_pte_cap_sc_datadep(c, v.pte_cap_sc_datadep());
+          } else {
+            let c = update_pte_cap_lc_datadep(c, 0b0);
+            update_pte_cap_sc_datadep(c, 0b0);
+          };
+
+  c
+}
+
+function clause ext_read_CSR (0x9C1) = Some(scisa.bits())
+
+function clause ext_write_CSR (0x9C1, value) = { scisa = legalize_scisa(scisa, value); Some(scisa.bits()) }
+
+function clause ext_is_CSR_defined (0x9C1, p) = haveSupMode() & (p == Machine | p == Supervisor)
+
 /* Other architectural registers */
 
 register PCC       : Capability

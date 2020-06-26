@@ -160,6 +160,10 @@ function ext_init_regs () = {
   misa->X() = 0b1;
   mccsr->d() = 0b1;
   mccsr->e() = 0b1;
+
+  scisa->pte_cap_lsmod() = 0b1;
+  scisa->pte_cap_lc_datadep() = 0b1;
+  scisa->pte_cap_sc_datadep() = 0b1;
 }
 
 /*!
