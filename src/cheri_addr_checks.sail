@@ -120,17 +120,15 @@ function ext_data_get_addr(base_reg : regidx, offset : xlenbits, acc : AccessTyp
 
   let (cap_val, newAddr, cause_regno) = get_cheri_cap_addr(base_reg, offset);
 
-  let have_rqd_load_perm : bool = match acc {
-    Read(Data)       => cap_val.permit_load,
-    Write(Data)      => true,
-    ReadWrite(Data)  => cap_val.permit_load,
-    Execute()        => false /* should only be for load/store */
-  };
-  let have_rqd_store_perm : bool = match acc {
-    Read(Data)       => true,
-    Write(Data)      => cap_val.permit_store,
-    ReadWrite(Data)  => cap_val.permit_store,
-    Execute()        => false /* should only be for load/store */
+  let (have_rqd_load_perm, have_rqd_store_perm) : (bool, bool) = match acc {
+    Read(Data)           => (cap_val.permit_load, true                ),
+    Write(Data)          => (true               , cap_val.permit_store),
+    ReadWrite(Data,Data) => (cap_val.permit_load, cap_val.permit_store),
+    Execute()            => internal_error("ext_data_get_addr for Execute"),
+    Read(Cap)            => internal_error("ext_data_get_addr for Read(Cap)"),
+    Write(Cap)           => internal_error("ext_data_get_addr for Write(Cap)"),
+    ReadWrite(Data,Cap)  => internal_error("ext_data_get_addr for ReadWrite(Data,Cap)"),
+    ReadWrite(Cap,_)     => internal_error("ext_data_get_addr for ReadWrite(Cap,_)")
   };
 
   if not(cap_val.tag) then

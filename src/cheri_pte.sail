@@ -186,16 +186,18 @@ function checkPTEPermission(ac : AccessType(ext_access_type), priv : Privilege, 
   let (succ, ext_ptw') : (bool, ext_ptw) =
   match (base_succ, ac) {
     /* Base translation exceptions take priority over CHERI exceptions */
-    (false, _)               => (false, init_ext_ptw),
+    (false, _)                    => (false, init_ext_ptw),
 
-    (true,  Read(Cap))       => (true, ext_ptw_join_lcm(ext_ptw, lcav)),
-    (true,  Write(Cap))      => (true, ext_ptw_join_scm(ext_ptw, scav)),
-    (true,  ReadWrite(Cap))  => (true, ext_ptw_join_scm(ext_ptw_join_lcm(ext_ptw, lcav), scav)),
+    (true,  Read(Cap))            => (true, ext_ptw_join_lcm(ext_ptw, lcav)),
+    (true,  Write(Cap))           => (true, ext_ptw_join_scm(ext_ptw, scav)),
+    (true,  ReadWrite(Data,Cap))  => (true, ext_ptw_join_scm(ext_ptw, scav)),
+    (true,  ReadWrite(Cap,Data))  => (true, ext_ptw_join_lcm(ext_ptw, lcav)),
+    (true,  ReadWrite(Cap,Cap))   => (true, ext_ptw_join_scm(ext_ptw_join_lcm(ext_ptw, lcav), scav)),
 
-    (true,  Read(Data))      => (true, ext_ptw),
-    (true,  Write(Data))     => (true, ext_ptw),
-    (true,  ReadWrite(Data)) => (true, ext_ptw),
-    (true,  Execute())       => (true, ext_ptw)
+    (true,  Read(Data))           => (true, ext_ptw),
+    (true,  Write(Data))          => (true, ext_ptw),
+    (true,  ReadWrite(Data,Data)) => (true, ext_ptw),
+    (true,  Execute())            => (true, ext_ptw)
   };
 
   if succ then PTE_Check_Success(ext_ptw') else PTE_Check_Failure(ext_ptw')
@@ -207,7 +209,7 @@ function update_PTE_Bits(p : PTE_Bits, a : AccessType(ext_access_type), ext : ex
                                   Execute()    => false,
                                   Read(_)      => false,
                                   Write(_)     => true,
-                                  ReadWrite(_) => true
+                                  ReadWrite(_,_) => true
                                 });
 
   // accessed bit
@@ -219,7 +221,7 @@ function update_PTE_Bits(p : PTE_Bits, a : AccessType(ext_access_type), ext : ex
   let update_sc = eb.StoreCap() == 0b0 & eb.StoreCap_Mod() == 0b1
                   & (match a {
                      Write(Cap)     => true,
-                     ReadWrite(Cap) => true,
+                     ReadWrite(_,Cap) => true,
                      _              => false
                   });
 
