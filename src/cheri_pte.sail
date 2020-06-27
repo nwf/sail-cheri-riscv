@@ -118,7 +118,7 @@ function isInvalidPTE(p : pteAttribs, ext : extPte) -> bool = {
 
 union PTE_Check = {
   PTE_Check_Success : ext_ptw,
-  PTE_Check_Failure : ext_ptw
+  PTE_Check_Failure : (ext_ptw, ext_ptw_fail)
 }
 
 /*
@@ -144,6 +144,28 @@ function checkPTEPermission_LC_caveat(p, e) =
               else PTW_LCM_TRAP
        }
 
+val checkPTEPermission_LC_caveat_datadep : (ext_ptw_lcm, ext_ptw) -> PTE_Check effect { rreg }
+function checkPTEPermission_LC_caveat_datadep(lcav, ext_ptw) = {
+  let ext_ptw' = ext_ptw_join_lcm(ext_ptw, lcav);
+  match (lcav) {
+    PTW_LCM_OK   => PTE_Check_Success(ext_ptw),
+    PTW_LCM_CLR  => PTE_Check_Success(ext_ptw'),
+    PTW_LCM_TRAP => {
+      if scisa.pte_cap_lc_datadep() == 0b1 then {
+        /*
+         * Continue translating, but add caveat
+         */
+        PTE_Check_Success(ext_ptw')
+      } else {
+        /*
+         * Stop translating and raise a trap now
+         */
+        PTE_Check_Failure(ext_ptw', EPTWF_CAP_ERR)
+      }
+    }
+  }
+}
+
 val checkPTEPermission_SC_caveat : Ext_PTE_Bits -> ext_ptw_scm
 function checkPTEPermission_SC_caveat(e) =
   match (e.StoreCap(), e.StoreCap_Mod()) {
@@ -151,6 +173,21 @@ function checkPTEPermission_SC_caveat(e) =
     (0b0, 0b0) => PTW_SCM_TRAP, /* Forbidden, unmodified */
     (0b0, 0b1) => PTW_SCM_OK    /* Forbidden, modified; see update_PTE_bits */
   }
+
+val checkPTEPermission_SC_caveat_datadep : (ext_ptw_scm, ext_ptw) -> PTE_Check effect { rreg }
+function checkPTEPermission_SC_caveat_datadep(scav, ext_ptw) = {
+  match (scav) {
+    PTW_SCM_OK => PTE_Check_Success(ext_ptw),
+    PTW_SCM_TRAP => {
+      let ext_ptw' = ext_ptw_join_scm(ext_ptw, scav);
+      if scisa.pte_cap_sc_datadep() == 0b1 then {
+        PTE_Check_Success(ext_ptw')
+      } else {
+        PTE_Check_Failure(ext_ptw', EPTWF_CAP_ERR)
+      }
+    }
+  }
+}
 
 function checkPTEPermission(ac : AccessType(ext_access_type), priv : Privilege, mxr : bool, do_sum : bool, p : PTE_Bits, ext : extPte, ext_ptw : ext_ptw) -> PTE_Check = {
   /*
@@ -165,7 +202,7 @@ function checkPTEPermission(ac : AccessType(ext_access_type), priv : Privilege, 
    *
    * 3. It's simpler to implement yet still safe (LC is unaffected by MXR).
    */
-  let base_succ : bool =
+  let succ : bool =
   match (ac, priv) {
     (Read(_),      User)       => p.U() == 0b1 & (p.R() == 0b1 | (p.X() == 0b1 & mxr)),
     (Write(_),     User)       => p.U() == 0b1 & p.W() == 0b1,
@@ -180,27 +217,67 @@ function checkPTEPermission(ac : AccessType(ext_access_type), priv : Privilege, 
     (_,            Machine)    => internal_error("m-mode mem perm check")
   };
 
+  let res : PTE_Check =
+    if   succ
+    then PTE_Check_Success(ext_ptw)
+    else PTE_Check_Failure(ext_ptw, EPTWF_NO_PERM);
+
   let e = Mk_Ext_PTE_Bits(ext);
-  let lcav = checkPTEPermission_LC_caveat(p, e);
+
+  /* And now it's time for a little (manual, expanded) Either-monadic logic. */
+
+  /*
+   * Check for invalid modifiers
+   */
+  let res : PTE_Check =
+    match res {
+      PTE_Check_Failure(_, _) => res,
+      PTE_Check_Success(_) =>
+       if scisa.pte_cap_lsmod() == 0b0 &
+          ~(e.StoreCap_Mod() == 0b0 &
+            e.LoadCap_Mod() == 0b0 &
+            e.LoadCap_Gen() == 0b0)
+       then PTE_Check_Failure(ext_ptw, EPTWF_INVALID)
+       else res
+    };
+
+  /*
+   * Check for store-side caveats, which may force a fault if data-independent
+   */
   let scav = checkPTEPermission_SC_caveat(e);
-  let (succ, ext_ptw') : (bool, ext_ptw) =
-  match (base_succ, ac) {
-    /* Base translation exceptions take priority over CHERI exceptions */
-    (false, _)                    => (false, init_ext_ptw),
+  let res : PTE_Check =
+    match res {
+      PTE_Check_Failure(_, _) => res,
+      PTE_Check_Success(ext_ptw) => match ac {
+        Execute()          => res,
+        Read(_)            => res,
+        Write(Data)        => res,
+        ReadWrite(_, Data) => res,
 
-    (true,  Read(Cap))            => (true, ext_ptw_join_lcm(ext_ptw, lcav)),
-    (true,  Write(Cap))           => (true, ext_ptw_join_scm(ext_ptw, scav)),
-    (true,  ReadWrite(Data,Cap))  => (true, ext_ptw_join_scm(ext_ptw, scav)),
-    (true,  ReadWrite(Cap,Data))  => (true, ext_ptw_join_lcm(ext_ptw, lcav)),
-    (true,  ReadWrite(Cap,Cap))   => (true, ext_ptw_join_scm(ext_ptw_join_lcm(ext_ptw, lcav), scav)),
+        ReadWrite(_, Cap ) => checkPTEPermission_SC_caveat_datadep(scav, ext_ptw),
+        Write(Cap)         => checkPTEPermission_SC_caveat_datadep(scav, ext_ptw)
+      }
+    };
 
-    (true,  Read(Data))           => (true, ext_ptw),
-    (true,  Write(Data))          => (true, ext_ptw),
-    (true,  ReadWrite(Data,Data)) => (true, ext_ptw),
-    (true,  Execute())            => (true, ext_ptw)
-  };
+  /*
+   * Now do load-side caveats, which may also force a fault if data-dependent
+   */
+  let lcav = checkPTEPermission_LC_caveat(p, e);
+  let res : PTE_Check =
+    match res {
+      PTE_Check_Failure(_, _) => res,
+      PTE_Check_Success(ext_ptw) => match ac {
+        Execute()          => res,
+        Write(_)           => res,
+        Read(Data)         => res,
+        ReadWrite(Data, _) => res,
 
-  if succ then PTE_Check_Success(ext_ptw') else PTE_Check_Failure(ext_ptw')
+        Read(Cap)          => checkPTEPermission_LC_caveat_datadep(lcav, ext_ptw),
+        ReadWrite(Cap, _)  => checkPTEPermission_LC_caveat_datadep(lcav, ext_ptw)
+      }
+    };
+
+  res
 }
 
 function update_PTE_Bits(p : PTE_Bits, a : AccessType(ext_access_type), ext : extPte) -> option((PTE_Bits, extPte)) = {

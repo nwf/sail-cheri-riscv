@@ -61,6 +61,13 @@ let init_ext_ptw : ext_ptw = struct {
   ptw_sc_mod = PTW_SCM_OK
 }
 
+/* Address translation failures */
+enum ext_ptw_fail = {
+  EPTWF_NO_PERM,
+  EPTWF_INVALID,
+  EPTWF_CAP_ERR
+}
+
 /* Address translation errors */
 enum ext_ptw_error = {AT_CAP_ERR}
 
@@ -71,13 +78,6 @@ enum ext_exc_type = {
   EXC_SAMO_CAP_PAGE_FAULT,
   EXC_CHERI
 }
-
-/* CHERI translation of PTW errors into exception annotations */
-function ext_translate_exception(e : ext_ptw_error) -> ext_exc_type =
-  match e {
-    AT_LOAD_CAP_ERR  => EXC_LOAD_CAP_PAGE_FAULT,
-    AT_STORE_CAP_ERR => EXC_SAMO_CAP_PAGE_FAULT
-  }
 
 /* CHERI conversion of extension exceptions to bits */
 val ext_exc_type_to_bits : ext_exc_type -> exc_code

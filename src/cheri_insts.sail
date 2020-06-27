@@ -945,6 +945,9 @@ val handle_load_cap_via_cap : (regidx, capreg_idx, Capability, xlenbits) -> Reti
 function handle_load_cap_via_cap(rd, cs, cap_val, vaddrBits) = {
   let aq : bool = false;
   let rl : bool = false;
+
+  let vialc : bool = cap_val.permit_load_cap;
+
   if not(cap_val.tag) then {
     handle_cheri_cap_exception(CapEx_TagViolation, cs);
     RETIRE_FAIL
@@ -960,11 +963,9 @@ function handle_load_cap_via_cap(rd, cs, cap_val, vaddrBits) = {
   } else if not(is_aligned_addr(vaddrBits, cap_size)) then {
     handle_mem_exception(vaddrBits, E_Load_Addr_Align());
     RETIRE_FAIL
-  } else match translateAddr(vaddrBits, Read(Cap)) {
-    TR_Failure(E_Extension(_), _) => { internal_error("unexpected cheri exception for cap load") },
+  } else match translateAddr(vaddrBits, Read(if vialc then Cap else Data)) {
     TR_Failure(e, _) => { handle_mem_exception(vaddrBits, e); RETIRE_FAIL },
     TR_Address(addr, ptw_info) => {
-      let vialc : bool = cap_val.permit_load_cap;
       let lcav : ext_ptw_lcm = ptw_info.ptw_lc_mod;
 
       let c = mem_read_cap(addr, aq, rl, false);

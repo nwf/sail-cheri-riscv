@@ -24,11 +24,16 @@ function ptw_error_to_str(e) =
 
 overload to_str = {ptw_error_to_str}
 
-function ext_get_ptw_error(ext_ptw : ext_ptw) -> PTW_Error =
-  match (ext_ptw) {
-    PTW_CAP_OK        => PTW_No_Permission(),
-    PTW_LOAD_CAP_ERR  => PTW_Ext_Error(AT_CAP_ERR),
-    PTW_STORE_CAP_ERR => PTW_Ext_Error(AT_CAP_ERR)
+/*
+ * checkPTEPermission has returned a failure; here, ext_ptw is no longer
+ * caveats for data dependence, but rather certainly identifies the cause of a
+ * trap.
+ */
+function ext_get_ptw_error(eptwf : ext_ptw_fail) -> PTW_Error =
+  match (eptwf) {
+    EPTWF_NO_PERM  => PTW_No_Permission(),
+    EPTWF_INVALID  => PTW_Invalid_PTE(),
+    EPTWF_CAP_ERR  => PTW_Ext_Error(AT_CAP_ERR)
   }
 
 /* conversion of these translation/PTW failures into architectural exceptions */
@@ -36,10 +41,10 @@ function translationException(a : AccessType(ext_access_type), f : PTW_Error) ->
   let e : ExceptionType =
   match (a, f) {
     /* First handle the vmem extension errors */
+    (Read(Cap), PTW_Ext_Error(AT_CAP_ERR))        => E_Extension(EXC_LOAD_CAP_PAGE_FAULT),
+    (Write(Cap), PTW_Ext_Error(AT_CAP_ERR))       => E_Extension(EXC_SAMO_CAP_PAGE_FAULT),
     (ReadWrite(Cap,_), PTW_Ext_Error(AT_CAP_ERR)) => E_Extension(EXC_SAMO_CAP_PAGE_FAULT),
     (ReadWrite(_,Cap), PTW_Ext_Error(AT_CAP_ERR)) => E_Extension(EXC_SAMO_CAP_PAGE_FAULT),
-    (Read(Cap), PTW_Ext_Error(AT_CAP_ERR))      => E_Extension(EXC_LOAD_CAP_PAGE_FAULT),
-    (Write(Cap), PTW_Ext_Error(AT_CAP_ERR))     => E_Extension(EXC_SAMO_CAP_PAGE_FAULT),
 
     /* For other exceptions, Cap accesses fault similar to Data accesses below. */
     (ReadWrite(Cap,_), PTW_Access())  => E_SAMO_Access_Fault(),
